@@ -1,18 +1,17 @@
 import os
 import json
-import typing
+from typing import *
 import traceback
 import socketserver
 from functools import lru_cache
 
-import psutil
 import pyee
 import requests
 
 from .logger import logger
 from .events import ALL_MESSAGE
 from .model import Event, Account, Contact, ContactDetail, Room, RoomMembers, Table, DB, Response
-from .utils import WeChatManager, start_wechat_with_inject, fake_wechat_version, get_pid, parse_event
+from .utils import parse_event
 
 
 class RequestHandler(socketserver.BaseRequestHandler):
@@ -41,57 +40,42 @@ class Bot:
 
     def __init__(
         self,
-        on_login: typing.Optional[typing.Callable[["Bot", Event], typing.Any]] = None,
-        on_before_message: typing.Optional[typing.Callable[["Bot", Event], typing.Any]] = None,
-        on_after_message: typing.Optional[typing.Callable[["Bot", Event], typing.Any]] = None,
-        on_start: typing.Optional[typing.Callable[["Bot"], typing.Any]] = None,
-        on_stop: typing.Optional[typing.Callable[["Bot"], typing.Any]] = None,
-        faked_version: typing.Optional[str] = None
+        server_host: str = "0.0.0.0",
+        server_port: int = 8080,
+        remote_host: str = "127.0.0.1",
+        remote_port: int = 8080,
+        webhook_url: str = None,
+        on_login: Optional[Callable[["Bot", Event], Any]] = None,
+        on_before_message: Optional[Callable[["Bot", Event], Any]] = None,
+        on_after_message: Optional[Callable[["Bot", Event], Any]] = None,
+        on_start: Optional[Callable[["Bot"], Any]] = None,
+        on_stop: Optional[Callable[["Bot"], Any]] = None,
     ):
-        self.version = "3.9.5.81"
-        self.server_host = "127.0.0.1"
-        self.remote_host = "127.0.0.1"
+        self.server_host = server_host
+        self.server_port = server_port
+        self.remote_host = remote_host
+        self.remote_port = remote_port
         self.on_start = on_start
         self.on_login = on_login
         self.on_before_message = on_before_message
         self.on_after_message = on_after_message
         self.on_stop = on_stop
-        self.faked_version = faked_version
         self.event_emitter = pyee.EventEmitter()
-        self.wechat_manager = WeChatManager()
-        self.remote_port, self.server_port = self.wechat_manager.get_port()
         self.BASE_URL = f"http://{self.remote_host}:{self.remote_port}"
-        self.webhook_url = None
+        self.webhook_url = webhook_url
         self.DATA_SAVE_PATH = None
         self.WXHELPER_PATH = None
         self.FILE_SAVE_PATH = None
         self.IMAGE_SAVE_PATH = None
         self.VIDEO_SAVE_PATH = None
 
-        try:
-            code, output = start_wechat_with_inject(self.remote_port)
-        except Exception:
-            code, output = get_pid(self.remote_port)
-
-        if code == 1:
-            raise Exception(output)
-
-        self.process = psutil.Process(int(output))
-
-        if self.faked_version is not None:
-            if fake_wechat_version(self.process.pid, self.version, faked_version) == 0:
-                logger.success(f"wechat version faked: {self.version} -> {faked_version}")
-            else:
-                logger.error(f"wechat version fake failed.")
-
         logger.info(f"API Server at 0.0.0.0:{self.remote_port}")
-        self.wechat_manager.add(self.process.pid, self.remote_port, self.server_port)
         self.call_hook_func(self.on_start, self)
         self.handle(ALL_MESSAGE, once=True)(self.init_bot)
         self.hook_sync_msg(self.server_host, self.server_port)
 
     @staticmethod
-    def call_hook_func(func: typing.Callable, *args, **kwargs) -> typing.Any:
+    def call_hook_func(func: Callable, *args, **kwargs) -> Any:
         if callable(func):
             return func(*args, **kwargs)
 
@@ -117,12 +101,12 @@ class Bot:
         return requests.request("POST", self.BASE_URL + api, *args, **kwargs).json()
 
     def hook_sync_msg(
-        self,
-        ip: str,
-        port: int,
-        enable_http: int = 0,
-        url: str = "http://127.0.0.1:8000",
-        timeout: int = 30
+            self,
+            ip: str,
+            port: int,
+            enable_http: int = 0,
+            url: str = "http://127.0.0.1:8000",
+            timeout: int = 30
     ) -> Response:
         """hook同步消息"""
         data = {
@@ -188,15 +172,15 @@ class Bot:
         return Response(**self.call_api("/api/sendFileMsg", json=data))
 
     def send_applet(
-        self,
-        wxid: str,
-        waid_contact: str,
-        waid: str,
-        applet_wxid: str,
-        json_param: str,
-        head_img_url: str,
-        main_img: str,
-        index_page: str
+            self,
+            wxid: str,
+            waid_contact: str,
+            waid: str,
+            applet_wxid: str,
+            json_param: str,
+            head_img_url: str,
+            main_img: str,
+            index_page: str
     ) -> Response:
         """发送小程序消息"""
         data = {
@@ -211,7 +195,7 @@ class Bot:
         }
         return Response(**self.call_api("/api/sendApplet", json=data))
 
-    def send_room_at(self, room_id: str, wxids: typing.List[str], msg: str) -> Response:
+    def send_room_at(self, room_id: str, wxids: List[str], msg: str) -> Response:
         """发送群@消息"""
         data = {
             "chatRoomId": room_id,
@@ -228,7 +212,7 @@ class Bot:
         }
         return Response(**self.call_api("/api/sendPatMsg", json=data))
 
-    def get_contacts(self) -> typing.List[Contact]:
+    def get_contacts(self) -> List[Contact]:
         """获取联系人列表"""
         return [Contact(**item) for item in self.call_api("/api/getContactList")["data"]]
 
@@ -239,7 +223,7 @@ class Bot:
         }
         return ContactDetail(**self.call_api("/api/getContactProfile", json=data)["data"])
 
-    def create_room(self, member_ids: typing.List[str]) -> Response:
+    def create_room(self, member_ids: List[str]) -> Response:
         """创建群聊"""
         data = {
             "memberIds": ",".join(member_ids)
@@ -267,7 +251,7 @@ class Bot:
         }
         return RoomMembers(**self.call_api("/api/getMemberFromChatRoom", json=data)["data"])
 
-    def add_room_member(self, room_id: str, member_ids: typing.List[str]) -> Response:
+    def add_room_member(self, room_id: str, member_ids: List[str]) -> Response:
         """添加群成员"""
         data = {
             "chatRoomId": room_id,
@@ -275,7 +259,7 @@ class Bot:
         }
         return Response(**self.call_api("/api/addMemberToChatRoom", json=data))
 
-    def delete_room_member(self, room_id: str, member_ids: typing.List[str]) -> Response:
+    def delete_room_member(self, room_id: str, member_ids: List[str]) -> Response:
         """删除群成员"""
         data = {
             "chatRoomId": room_id,
@@ -283,7 +267,7 @@ class Bot:
         }
         return Response(**self.call_api("/api/delMemberFromChatRoom", json=data))
 
-    def invite_room_member(self, room_id: str, member_ids: typing.List[str]) -> Response:
+    def invite_room_member(self, room_id: str, member_ids: List[str]) -> Response:
         """邀请群成员"""
         data = {
             "chatRoomId": room_id,
@@ -357,14 +341,14 @@ class Bot:
         return Response(**self.call_api("/api/downloadAttach", json=data))
 
     def forward_public_msg(
-        self,
-        wxid: str,
-        app_name: str,
-        username: str,
-        title: str,
-        url: str,
-        thumb_url: str,
-        digest: str
+            self,
+            wxid: str,
+            app_name: str,
+            username: str,
+            title: str,
+            url: str,
+            thumb_url: str,
+            digest: str
     ) -> Response:
         """转发公众号消息"""
         data = {
@@ -409,7 +393,7 @@ class Bot:
         }
         return Response(**self.call_api("/api/ocr", json=data))
 
-    def get_db_info(self) -> typing.List[DB]:
+    def get_db_info(self) -> List[DB]:
         """获取数据库句柄"""
         return [
             DB(databaseName=item["databaseName"], handle=item["handle"], tables=[
@@ -449,7 +433,7 @@ class Bot:
             logger.error(traceback.format_exc())
             logger.error(raw_data)
 
-    def handle(self, events: typing.Union[typing.List[str], str, None] = None, once: bool = False) -> typing.Callable[[typing.Callable], None]:
+    def handle(self, events: Union[List[str], str, None] = None, once: bool = False) -> Callable[[Callable], None]:
         def wrapper(func):
             listen = self.event_emitter.on if not once else self.event_emitter.once
             if not events:
@@ -462,7 +446,7 @@ class Bot:
 
     def exit(self) -> None:
         self.call_hook_func(self.on_stop, self)
-        self.process.terminate()
+        self.unhook_sync_msg()
 
     def run(self) -> None:
         try:
